@@ -1,0 +1,40 @@
+#!/usr/bin/sh
+OVPN_PATH=/vpn/client.ovpn
+
+PUB_IFACE=$(ip route get 8.8.8.8 | grep -oP '(?<=dev )[^ ]+')
+DOCKER_CONTAINER_NAME=docker-vpn-gateway
+
+start() {
+  docker run -d --rm --name $DOCKER_CONTAINER_NAME \
+    --cap-add=NET_ADMIN \
+    --device /dev/net/tun \
+    -v "$OVPN_PATH:/vpn/client.conf" \
+    nocent/openvpn-client openvpn --config "/vpn/client.conf"
+
+  CONTAINER_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $DOCKER_CONTAINER_NAME)
+
+  docker exec $DOCKER_CONTAINER_NAME iptables -t nat -A POSTROUTING -o tun0 -j MASQUERADE
+  docker exec $DOCKER_CONTAINER_NAME iptables -A INPUT -i tun0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+  
+  ip rule add iif $PUB_IFACE table 128
+  ip route add table 128 default via $CONTAINER_IP
+  ip route add table 128 throw 172.17.0.0/16
+
+  iptables -t nat -A POSTROUTING -o docker0 -j MASQUERADE
+  iptables -A INPUT -i docker0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+  iptables -A FORWARD -i $PUB_IFACE -o docker0 -j ACCEPT
+}
+
+stop() {
+  iptables -D FORWARD -i $PUB_IFACE -o docker0 -j ACCEPT
+  iptables -D INPUT -i docker0 -m state --state RELATED,ESTABLISHED -j ACCEPT
+  iptables -t nat -D POSTROUTING -o docker0 -j MASQUERADE
+
+  ip route flush table 128
+  ip rule delete iif $PUB_IFACE table 128
+  docker stop $DOCKER_CONTAINER_NAME
+}
+
+case $1 in
+  start|stop) "$1" ;;
+esac
