@@ -9,7 +9,7 @@ start() {
     --cap-add=NET_ADMIN \
     --device /dev/net/tun \
     -v "$OVPN_PATH:/vpn/client.conf" \
-    nocent/openvpn-client openvpn --config "/vpn/client.conf"
+    ilian/openvpn-client openvpn --config "/vpn/client.conf"
 
   CONTAINER_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $DOCKER_CONTAINER_NAME)
 
